@@ -3,6 +3,8 @@ const fs = require('fs')
 
 let argv = require('minimist')(process.argv.slice(2));
 
+console.log(argv)
+
 // Load all files
 let input = {
     name : [],
@@ -31,22 +33,24 @@ function allocArgs(m, lst) {
         heap8[ptr+3] = (ptr>>24)&0xff
     }
     let malloc = m.instance.exports._malloc
-    let argv = lst.map(function (str) {
+    let args = lst.map(function (str) {
         let ptr = malloc(str.length+1)
         for (let i = 0; i < str.length; i++) heap8[ptr+1] = str.charCodeAt(i)
         heap8[ptr+str.length] = 0
         return ptr
     })
     let res = malloc(lst.length*4)
-    for (let i = 0; i < lst.length; i++) setInt(res+i*4, argv[i])
+    for (let i = 0; i < lst.length; i++) setInt(res+i*4, args[i])
     return res
 }
 
-let module
+let mdle
 let system = 0
 
 let gas = 0
 let gas_limit = 0
+let call_limit = 0
+let stack_limit = 0
 
 let HEAP32, HEAP8, e
 
@@ -58,9 +62,9 @@ function _sbrk(increment) {
       let newDynamicTop = 0;
       // var totalMemory = 0;
     
-    console.log(module.DYNAMICTOP_PTR, HEAP32[module.DYNAMICTOP_PTR>>2])
+    console.log(mdle.DYNAMICTOP_PTR, HEAP32[mdle.DYNAMICTOP_PTR>>2])
     
-      oldDynamicTop = HEAP32[module.DYNAMICTOP_PTR>>2]|0;
+      oldDynamicTop = HEAP32[mdle.DYNAMICTOP_PTR>>2]|0;
       newDynamicTop = oldDynamicTop + increment | 0;
 /*
       if (((increment|0) > 0 & (newDynamicTop|0) < (oldDynamicTop|0)) // Detect and fail if we would wrap around signed 32-bit int.
@@ -70,7 +74,7 @@ function _sbrk(increment) {
         return -1;
       }
 */
-      HEAP32[module.DYNAMICTOP_PTR>>2] = newDynamicTop;
+      HEAP32[mdle.DYNAMICTOP_PTR>>2] = newDynamicTop;
     /*
       totalMemory = getTotalMemory()|0;
       if ((newDynamicTop|0) > (totalMemory|0)) {
@@ -87,9 +91,9 @@ function _sbrk(increment) {
 // Make our runtime environment for the wasm module
 function makeEnv(env) {
     function finalize() {
-        module._finalizeSystem()
+        mdle._finalizeSystem()
     }
-    env.getTotalMemory = function () { return module['TOTAL_MEMORY']; };
+    env.getTotalMemory = function () { return mdle['TOTAL_MEMORY']; };
     env.abort = function () { process.exit(-1) }
     env.exit = function () {
         finalize()
@@ -162,6 +166,28 @@ function makeEnv(env) {
         flushFiles()
         process.exit(-1)
     }
+    
+    // stack limit
+    
+    env.pushFrame = function (x) {
+        call_limit--
+        stack_limit -= x
+        if (call_limit < 0) {
+            console.log("Exceeded call stack limit")
+            flushFiles()
+            process.exit(-1)
+        }
+        if (stack_limit < 0) {
+            console.log("Exceeded stack limit")
+            flushFiles()
+            process.exit(-1)
+        }
+    }
+
+    env.popFrame = function (x) {
+        call_limit++
+        stack_limit += x
+    }
 
 }
 
@@ -174,7 +200,14 @@ function handleImport(env, imp) {
     function makeDynamicCall(i) {
         return function () {
             // console.log("dyncall", i)
-            return module["_dynCall"+i].apply(null, arguments)
+            return mdle["_dynCall"+i].apply(null, arguments)
+        }
+    }
+
+    function makeDynamicCall2(i) {
+        return function () {
+            // console.log("dyncall", i)
+            return mdle["dynCall"+i].apply(null, arguments)
         }
     }
 
@@ -182,6 +215,11 @@ function handleImport(env, imp) {
     if (str.substr(0,7) == "_invoke") {
         let idx = str.substr(7)
         env["_invoke" + idx] = makeDynamicCall(idx)
+        return
+    }
+    if (str.substr(0,6) == "invoke") {
+        let idx = str.substr(6)
+        env["invoke" + idx] = makeDynamicCall2(idx)
         return
     }
     
@@ -213,8 +251,8 @@ function flushFiles() {
 async function run(binary, args) {
     let info = { env: {}, global: {NaN: 0/0, Infinity:1/0} }
     // var sz = TOTAL_MEMORY / WASM_PAGE_SIZE
-    let sz = 256
-    info.env.table = new WebAssembly.Table({ 'initial': 10, 'maximum': 10, 'element': 'anyfunc' });
+    let sz = argv["memory-size"] || 4096
+    info.env.table = new WebAssembly.Table({ 'initial': 30784, 'maximum': 30784, 'element': 'anyfunc' });
     info.env.memory = new WebAssembly.Memory({ 'initial': sz, 'maximum': sz })
     
     // dta.map(e => { info[e[0]][e[1]] = function () {} })
@@ -229,9 +267,24 @@ async function run(binary, args) {
     imports.forEach(imp => handleImport(info.env,imp))
     
     let m = await WebAssembly.instantiate(new Uint8Array(binary), info)
-    module = m.instance.exports
+    mdle = m.instance.exports
     
-    gas_limit = module['GAS_LIMIT']*1000000
+    gas_limit = mdle['GAS_LIMIT']*1000000
+    let frame_max = mdle.FRAME_MAX || 0
+    
+    console.log("FRAME MAX", frame_max)
+    
+    call_limit = Math.pow(2, argv["call-limit"] || 10)
+    stack_limit = Math.pow(2, argv["stack-limit"] || 10) - frame_max
+
+    // asmjs initialization
+    if (mdle.ASMJS != undefined) {
+        console.log("ASM.js code")
+        let ptr = mdle._malloc(1024)
+        mdle.setHelperStack(ptr)
+        mdle.setHelperStackLimit(ptr+1024)
+    }
+    
     // gas_limit = 1000*1000000
     console.log("gas limit", gas_limit)
 
@@ -252,11 +305,11 @@ async function run(binary, args) {
         }
     }
     // if (e.__GLOBAL__sub_I_iostream_cpp) e.__GLOBAL__sub_I_iostream_cpp()
-    let argv = allocArgs(m, args)
+    let arg_ptr = allocArgs(m, args)
 
     console.log("calling main")
 
-    e._main(args.length, argv)
+    e._main(args.length, arg_ptr)
 
     finalize()
 }
