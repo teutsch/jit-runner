@@ -1,7 +1,9 @@
 
-function addCritical() {
+module.exports.makeEnv = function () {
     /* Finding critical path */
     
+    let env = {}
+
     var stack = []
     var step = 0
     var target = 100000
@@ -16,22 +18,24 @@ function addCritical() {
         step_stack = [0]
     }
     
-    var saved = {}
-    
+    env.saved = {}
+
+    /*
     env.printStack = function () {
-        var str = JSON.stringify(saved)
+        var str = JSON.stringify(env.saved)
         console.log(str, step)
         fs.writeFileSync("critical.json", str)
     }
+    */
     
     env.enterLoopCritical = function () {
         step++
         if (step % 1000 == 0) console.log(step)
         if (step == target) {
             step_stack.push(target)
-            saved.func = func_stack.concat()
-            saved.loop = loop_stack.concat()
-            saved.step = step_stack.concat()
+            env.saved.func = func_stack.concat()
+            env.saved.loop = loop_stack.concat()
+            env.saved.step = step_stack.concat()
         }
         loop_stack[loop_stack.length-1]++
     }
@@ -83,11 +87,16 @@ function addCritical() {
         }
     }
     
+    /*
     try {
         var obj = JSON.parse(fs.readFileSync("critical.json"))
         addStackEnv(env, obj)
     }
     catch (e) {}
+    */
+    
+    return env
+    
 
 }
 

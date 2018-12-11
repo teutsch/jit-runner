@@ -1,5 +1,9 @@
 
-function addStackEnv(env, obj, HEAP8) {
+module.exports.makeEnv = function (obj, memory) {
+    
+    let env = {}
+    
+    let HEAP8 = new Uint8Array(memory.buffer)
     
     function getI64() {
         var buffer = new ArrayBuffer(8)
@@ -71,5 +75,11 @@ function addStackEnv(env, obj, HEAP8) {
     env.printStack = function () {
         console.log(stack, step)
     }
+    
+    env.storeIndirect = function (a) {
+        return a
+    }
+    
+    return env
 
 }

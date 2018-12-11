@@ -1,7 +1,21 @@
 
 const fs = require('fs')
+const buildstack = require("./buildstack")
+const critical = require("./critical")
+const execFile = require('child_process').execFile
 
 let argv = require('minimist')(process.argv.slice(2));
+
+const wasm_path = __dirname + "/../ocaml-offchain/interpreter/wasm"
+
+function doExec(e, args, path) {
+    return new Promise(function (resolve, reject) {
+        execFile(e, args, { cwd: path }, function (error, stdout, stderr) {
+                console.error(stderr)
+                resolve(stdout)
+        })
+    })
+}
 
 console.log(argv)
 
@@ -21,6 +35,11 @@ function loadFile(fn) {
 function loadedFiles() {
     input.name.push("")
     input.data.push("")
+}
+
+function resetFiles() {
+    input.name = [];
+    input.data = [];
 }
 
 // setup command line parameters, needs malloc
@@ -236,8 +255,6 @@ function finalize() {
 
     flushFiles()
 
-    console.log("exiting")
-
 }
 
 function flushFiles() {
@@ -248,13 +265,21 @@ function flushFiles() {
     }
 }
 
-async function run(binary, args) {
-    let info = { env: {}, global: {NaN: 0/0, Infinity:1/0} }
-    // var sz = TOTAL_MEMORY / WASM_PAGE_SIZE
+function makeMemory() {
     let sz = argv["memory-size"] || 4096
-    info.env.table = new WebAssembly.Table({ 'initial': 30784, 'maximum': 30784, 'element': 'anyfunc' });
-    info.env.memory = new WebAssembly.Memory({ 'initial': sz, 'maximum': sz })
+    // var sz = TOTAL_MEMORY / WASM_PAGE_SIZE
+    let memory = new WebAssembly.Memory({ 'initial': sz, 'maximum': sz })
+    HEAP32 = new Uint32Array(memory.buffer)
+    HEAP8 = new Uint8Array(memory.buffer)
     
+    console.log("What", memory)
+    return memory
+}
+
+async function run(binary, args, env, memory) {
+    let info = { env: env, global: {NaN: 0/0, Infinity:1/0} }
+    info.env.table = new WebAssembly.Table({ 'initial': 30784, 'maximum': 30784, 'element': 'anyfunc' });
+    info.env.memory = memory
     // dta.map(e => { info[e[0]][e[1]] = function () {} })
     
     let mod = await WebAssembly.compile(new Uint8Array(binary))
@@ -265,6 +290,8 @@ async function run(binary, args) {
     makeEnv(info.env)
     
     imports.forEach(imp => handleImport(info.env,imp))
+    
+    console.log("What", info.memory)
     
     let m = await WebAssembly.instantiate(new Uint8Array(binary), info)
     mdle = m.instance.exports
@@ -290,9 +317,6 @@ async function run(binary, args) {
 
     m.wasmMemory = info.env.memory
     
-    HEAP32 = new Uint32Array(info.env.memory.buffer)
-    HEAP8 = new Uint8Array(info.env.memory.buffer)
-    
     e = m.instance.exports
     
     // After building the environment, run the init functions
@@ -309,24 +333,57 @@ async function run(binary, args) {
 
     console.log("calling main")
 
-    e._main(args.length, arg_ptr)
+    try {
+        e._main(args.length, arg_ptr)
+    }
+    catch (e) {
+        console.log("exception while executing", e)
+    }
 
     finalize()
+    
+    console.log("exiting")
 }
 
-function main() {
+function loadFiles() {
     let files = argv["file"]
     if (!files) files = []
     if (typeof files == "string") files = [files]
     files.forEach(loadFile)
 
     loadedFiles()
-
-    console.log(process.cwd())
-
-    run(fs.readFileSync("task.wasm"), ["/home/truebit/program.wasm"])
 }
 
-main()
 
+function main() {
+    
+    let memory = makeMemory()
+    loadFiles()
+    run(fs.readFileSync("task.wasm"), ["/home/truebit/program.wasm"], {}, memory)
+}
+
+async function findStack(num) {
+    // generate two needed files
+    await doExec(wasm_path, ["-critical", "task.wasm"])
+    await doExec(wasm_path, ["-build-stack", "task.wasm"])
+    
+    var crit_env = critical.makeEnv()
+    
+    let memory = makeMemory()
+    loadFiles()
+
+    await run(fs.readFileSync("critical.wasm"), ["/home/truebit/program.wasm"], crit_env, memory)
+
+    memory = makeMemory()
+    resetFiles()
+    loadFiles()
+
+    var stack_env = buildstack.makeEnv(crit_env.saved, memory)
+    
+    await run(fs.readFileSync("buildstack.wasm"), ["/home/truebit/program.wasm"], stack_env, memory)
+
+}
+
+if (typeof argv.dump == "number") findStack(parseInt(argv.dump))
+else main()
 
