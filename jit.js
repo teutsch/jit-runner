@@ -44,6 +44,8 @@ function resetFiles() {
 
 // setup command line parameters, needs malloc
 function allocArgs(m, lst) {
+    let malloc = m.instance.exports._malloc
+    if (!malloc) return
     let heap8 = new Uint8Array(m.wasmMemory.buffer)
     function setInt(ptr, i) {
         heap8[ptr+0] = ptr&0xff
@@ -51,7 +53,6 @@ function allocArgs(m, lst) {
         heap8[ptr+2] = (ptr>>16)&0xff
         heap8[ptr+3] = (ptr>>24)&0xff
     }
-    let malloc = m.instance.exports._malloc
     let args = lst.map(function (str) {
         let ptr = malloc(str.length+1)
         for (let i = 0; i < str.length; i++) heap8[ptr+1] = str.charCodeAt(i)
@@ -296,7 +297,7 @@ async function run(binary, args, env, memory) {
     let m = await WebAssembly.instantiate(new Uint8Array(binary), info)
     mdle = m.instance.exports
     
-    gas_limit = mdle['GAS_LIMIT']*1000000
+    gas_limit = (mdle['GAS_LIMIT'] || 0)*1000000
     let frame_max = mdle.FRAME_MAX || 0
     
     console.log("FRAME MAX", frame_max)
@@ -367,12 +368,21 @@ async function findStack(num) {
     await doExec(wasm_path, ["-critical", "task.wasm"])
     await doExec(wasm_path, ["-build-stack", "task.wasm"])
     
-    var crit_env = critical.makeEnv()
+    var crit_env = critical.makeEnv(num)
     
     let memory = makeMemory()
     loadFiles()
 
     await run(fs.readFileSync("critical.wasm"), ["/home/truebit/program.wasm"], crit_env, memory)
+    
+    if (num == 0) crit_env.saved.step = [0]
+
+    console.log("Steps", crit_env.getStep(), "Critical path", crit_env.saved)
+    
+    if (!crit_env.saved.step) {
+        console.log("Cannot find critical path for step", num)
+        return
+    }
 
     memory = makeMemory()
     resetFiles()

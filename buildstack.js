@@ -21,6 +21,12 @@ module.exports.makeEnv = function (obj, memory) {
     var step = 0
 
     var stack = []
+    var call_stack = []
+    
+    env.storeReturnPC = function (i) {
+        console.log("Return PC", i)
+        call_stack.push(i)
+    }
 
     env.countStep = function () {
         step++
@@ -34,27 +40,32 @@ module.exports.makeEnv = function (obj, memory) {
     }
     
     env.storeArg = function () {
-        return criticals[step+1] || false
+        return criticals[step] || false
     }
     
-    env.storeLocalI32 = function (idx, l) {
+    env.storeLocalI32 = function (l) {
+        console.log("Pushing", l)
         stack.push(l)
     }
 
-    env.storeLocalF32 = function (idx, l) {
+    env.storeLocalF32 = function (l) {
         stack.push(l)
     }
 
-    env.storeLocalF64 = function (idx, l) {
+    env.storeLocalF64 = function (l) {
         stack.push(l)
     }
 
-    env.storeLocalI64 = function (idx) {
+    env.storeLocalI64 = function () {
         stack.push(getI64())
     }
 
     env.adjustStackI32 = function (l) {
-        if (criticals[step]) stack.push(l)
+        console.log("Checking for return at step", step)
+        if (criticals[step+1]) {
+            console.log("Pushing return", l)
+            stack.push(l)
+        }
         return l
     }
 
