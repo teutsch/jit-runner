@@ -129,7 +129,7 @@ function makeEnv(env) {
             str += String.fromCharCode(HEAP8[ptr])
             ptr++
         }
-        console.log("DEBUG:", str)
+        console.log("DEBUG:", JSON.stringify(str).substr(0, 256))
     }
     env._debugBuffer = function (ptr, len) {
         let str = ""
@@ -138,7 +138,7 @@ function makeEnv(env) {
             len--
             ptr++
         }
-        console.log("DEBUG:", str)
+        console.log("DEBUG:", JSON.stringify(str).substr(0, 256))
     }
     env._debugInt = function (i) { console.log(i) }
     
