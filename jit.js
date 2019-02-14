@@ -219,7 +219,7 @@ function handleImport(env, imp) {
     if (env[str]) return
     function makeDynamicCall(i) {
         return function () {
-            // console.log("dyncall", i)
+            // console.log("_dyncall", i)
             return mdle["_dynCall"+i].apply(null, arguments)
         }
     }
@@ -267,19 +267,20 @@ function flushFiles() {
 }
 
 function makeMemory() {
-    let sz = argv["memory-size"] || 4096
+    let sz = argv["memory-size"] || 128
     // var sz = TOTAL_MEMORY / WASM_PAGE_SIZE
     let memory = new WebAssembly.Memory({ 'initial': sz, 'maximum': sz })
     HEAP32 = new Uint32Array(memory.buffer)
     HEAP8 = new Uint8Array(memory.buffer)
     
-    console.log("What", memory)
+    // console.log("What", memory)
     return memory
 }
 
 async function run(binary, args, env, memory) {
     let info = { env: env, global: {NaN: 0/0, Infinity:1/0} }
-    info.env.table = new WebAssembly.Table({ 'initial': 30784, 'maximum': 30784, 'element': 'anyfunc' });
+//    info.env.table = new WebAssembly.Table({ 'initial': 30784, 'maximum': 30784, 'element': 'anyfunc' });
+    info.env.table = new WebAssembly.Table({ 'initial': 100000, 'maximum': 100000, 'element': 'anyfunc' });
     info.env.memory = memory
     // dta.map(e => { info[e[0]][e[1]] = function () {} })
     
@@ -292,7 +293,7 @@ async function run(binary, args, env, memory) {
     
     imports.forEach(imp => handleImport(info.env,imp))
     
-    console.log("What", info.memory)
+    // console.log("What", info.memory)
     
     let m = await WebAssembly.instantiate(new Uint8Array(binary), info)
     mdle = m.instance.exports
