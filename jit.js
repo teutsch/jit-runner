@@ -110,12 +110,13 @@ function _sbrk(increment) {
 
 // Make our runtime environment for the wasm module
 function makeEnv(env) {
-    function finalize() {
-        mdle._finalizeSystem()
-    }
     env.getTotalMemory = function () { return mdle['TOTAL_MEMORY']; };
     env.abort = function () { process.exit(-1) }
     env.exit = function () {
+        finalize()
+        process.exit(0)
+    }
+    env._exit = function () {
         finalize()
         process.exit(0)
     }
