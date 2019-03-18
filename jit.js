@@ -48,19 +48,19 @@ function allocArgs(m, lst) {
     if (!malloc) return
     let heap8 = new Uint8Array(m.wasmMemory.buffer)
     function setInt(ptr, i) {
-        heap8[ptr+0] = ptr&0xff
-        heap8[ptr+1] = (ptr>>8)&0xff
-        heap8[ptr+2] = (ptr>>16)&0xff
-        heap8[ptr+3] = (ptr>>24)&0xff
+        heap8[ptr+0] = i&0xff
+        heap8[ptr+1] = (i>>8)&0xff
+        heap8[ptr+2] = (i>>16)&0xff
+        heap8[ptr+3] = (i>>24)&0xff
     }
     let args = lst.map(function (str) {
         let ptr = malloc(str.length+1)
-        for (let i = 0; i < str.length; i++) heap8[ptr+1] = str.charCodeAt(i)
-        heap8[ptr+str.length] = 0
+        for (let i = 0; i < str.length; i++) heap8[ptr+1+memory_offset] = str.charCodeAt(i)
+        heap8[ptr+str.length+memory_offset] = 0
         return ptr
     })
     let res = malloc(lst.length*4)
-    for (let i = 0; i < lst.length; i++) setInt(res+i*4, args[i])
+    for (let i = 0; i < lst.length; i++) setInt(res+i*4+memory_offset, args[i])
     return res
 }
 
@@ -71,6 +71,7 @@ let gas = 0
 let gas_limit = 0
 let call_limit = 0
 let stack_limit = 0
+let memory_offset = 0
 
 let HEAP32, HEAP8, e
 
@@ -82,29 +83,11 @@ function _sbrk(increment) {
       let newDynamicTop = 0;
       // var totalMemory = 0;
     
-    console.log(mdle.DYNAMICTOP_PTR, HEAP32[mdle.DYNAMICTOP_PTR>>2])
+    console.log(mdle.DYNAMICTOP_PTR, HEAP32[(mdle.DYNAMICTOP_PTR+memory_offset)>>2])
     
-      oldDynamicTop = HEAP32[mdle.DYNAMICTOP_PTR>>2]|0;
+      oldDynamicTop = HEAP32[(mdle.DYNAMICTOP_PTR+memory_offset)>>2]|0;
       newDynamicTop = oldDynamicTop + increment | 0;
-/*
-      if (((increment|0) > 0 & (newDynamicTop|0) < (oldDynamicTop|0)) // Detect and fail if we would wrap around signed 32-bit int.
-        | (newDynamicTop|0) < 0) { // Also underflow, sbrk() should be able to be used to subtract.
-        abortOnCannotGrowMemory()|0;
-        ___setErrNo(12);
-        return -1;
-      }
-*/
-      HEAP32[mdle.DYNAMICTOP_PTR>>2] = newDynamicTop;
-    /*
-      totalMemory = getTotalMemory()|0;
-      if ((newDynamicTop|0) > (totalMemory|0)) {
-        if ((enlargeMemory()|0) == 0) {
-          HEAP32[DYNAMICTOP_PTR>>2] = oldDynamicTop;
-          ___setErrNo(12);
-          return -1;
-        }
-      }
-      */
+      HEAP32[(mdle.DYNAMICTOP_PTR+memory_offset)>>2] = newDynamicTop;
       return oldDynamicTop|0;
 }
 
@@ -126,6 +109,7 @@ function makeEnv(env) {
     env._debugSeek = function (ptr) {}
     env._debugString = function (ptr) {
         var str = ""
+        ptr += memory_offset
         while (HEAP8[ptr] != 0) {
             str += String.fromCharCode(HEAP8[ptr])
             ptr++
@@ -134,6 +118,7 @@ function makeEnv(env) {
     }
     env._debugBuffer = function (ptr, len) {
         let str = ""
+        ptr += memory_offset
         while (len > 0) {
             str += String.fromCharCode(HEAP8[ptr])
             len--
@@ -148,6 +133,10 @@ function makeEnv(env) {
         return input.name[i].charCodeAt(j) || 0
     }
     
+    env._rintf = function (x) {
+       return x;
+    }
+
     env._inputSize = function (i,j) {
         return input.data[i].length
     }
@@ -245,7 +234,11 @@ function handleImport(env, imp) {
     }
     
     console.log("should generate import", str)
-    env[str] = function () { console.log("called", str) }
+    env[str] = function () {
+       console.log("called", str)
+        finalize()
+        process.exit(0)
+    }
 }
 
 function finalize() {
@@ -300,6 +293,7 @@ async function run(binary, args, env, memory) {
     mdle = m.instance.exports
     
     gas_limit = (mdle['GAS_LIMIT'] || 0)*1000000
+    memory_offset = mdle['MEMORY_OFFSET'] || 0
     let frame_max = mdle.FRAME_MAX || 0
     
     console.log("FRAME MAX", frame_max)
@@ -317,6 +311,7 @@ async function run(binary, args, env, memory) {
     
     // gas_limit = 1000*1000000
     console.log("gas limit", gas_limit)
+    console.log("memory offset", memory_offset)
 
     m.wasmMemory = info.env.memory
     
