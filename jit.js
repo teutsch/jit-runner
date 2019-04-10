@@ -161,7 +161,7 @@ function makeEnv(env) {
     env._outputData = function (i,j,c) {
         input.data[i][j] = c
     }
-    
+
     env.usegas = function (i) {
         gas += i
         if (gas > gas_limit) {
@@ -170,6 +170,8 @@ function makeEnv(env) {
             process.exit(-1)
         }
     }
+
+    env.gas = env.usegas
 
     env.abortStackOverflow = function () {
         console.log("stack overflow")
